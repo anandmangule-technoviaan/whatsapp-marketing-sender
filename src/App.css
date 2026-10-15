@@ -2833,3 +2833,25 @@
   flex: 1;
   min-width: 0;
 }
+
+/* Zero-Click Auto-Send Assistant Card */
+.zero-click-assistant-card {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(37, 211, 102, 0.06) 100%);
+  border: 1px dashed rgba(245, 158, 11, 0.4);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  margin-top: 10px;
+  margin-bottom: 12px;
+  transition: all var(--transition-normal);
+}
+
+.dark .zero-click-assistant-card,
+.dark-theme .zero-click-assistant-card {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12) 0%, rgba(37, 211, 102, 0.08) 100%);
+  border-color: rgba(245, 158, 11, 0.35);
+}
+
+.zero-click-assistant-card:hover {
+  border-color: var(--wa-green);
+  box-shadow: 0 2px 8px rgba(37, 211, 102, 0.15);
+}
