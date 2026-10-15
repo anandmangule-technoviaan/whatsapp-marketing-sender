@@ -2314,3 +2314,362 @@
   border: 1px solid #fde68a;
   animation: pulse 2s infinite;
 }
+
+/* =========================================================================
+   COMPREHENSIVE MOBILE RESPONSIVENESS (PHONES & TABLETS)
+   ========================================================================= */
+
+/* --- TABLETS & MEDIUM SCREENS (<= 992px) --- */
+@media (max-width: 992px) {
+  .main-content-area {
+    padding: 16px 14px 40px;
+  }
+
+  .sender-layout,
+  .active-dispatch-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .preview-container {
+    position: static;
+    top: auto;
+    margin-top: 8px;
+  }
+
+  .whatsapp-screen {
+    height: 460px;
+  }
+
+  .templates-grid {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+}
+
+/* --- SMARTPHONES & SMALL TABLETS (<= 768px) --- */
+@media (max-width: 768px) {
+  .header-inner {
+    padding: 10px 14px;
+    gap: 10px;
+  }
+
+  .brand-logo-badge {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+  }
+
+  .brand-title {
+    font-size: 16px;
+  }
+
+  .brand-tagline {
+    display: none;
+  }
+
+  .compliance-trigger-btn span {
+    display: none;
+  }
+
+  .compliance-trigger-btn {
+    padding: 7px;
+  }
+
+  .stats-ticker {
+    display: none;
+  }
+
+  .header-nav-bar {
+    padding: 0 10px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .header-nav-bar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-tabs-container {
+    gap: 4px;
+    padding: 6px 0;
+  }
+
+  .nav-tab-button {
+    padding: 6px 10px;
+    font-size: 12.5px;
+    gap: 5px;
+  }
+
+  .composer-card,
+  .importer-card,
+  .campaign-setup-card,
+  .campaign-active-header-card,
+  .active-contact-card,
+  .campaign-queue-card,
+  .contacts-list-card {
+    padding: 16px 14px;
+    border-radius: var(--radius-md);
+  }
+
+  .card-title {
+    font-size: 16.5px;
+  }
+
+  .form-grid-2 {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .campaign-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .camp-stat-box {
+    padding: 8px 10px;
+  }
+
+  .stat-num {
+    font-size: 17px;
+  }
+
+  .active-contact-header {
+    flex-direction: column;
+    gap: 10px;
+    align-items: flex-start;
+  }
+
+  .recipient-name-large {
+    font-size: 20px;
+  }
+
+  .campaign-control-actions {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .btn-control-pause,
+  .btn-control-secondary,
+  .btn-control-danger,
+  .btn-control-fast {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .auto-countdown-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  .countdown-circle {
+    width: 38px;
+    height: 38px;
+    font-size: 14px;
+  }
+
+  .dispatch-secondary-actions {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .action-buttons-row {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .btn-send-whatsapp,
+  .btn-clear-fields {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .contacts-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .contacts-toolbar-right {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .search-input-wrapper {
+    width: 100%;
+    max-width: 100% !important;
+  }
+
+  .search-input {
+    width: 100%;
+  }
+
+  .btn-send-campaign-direct,
+  .btn-clear-all {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .analytics-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .analytics-stat-card {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .analytics-stat-val {
+    font-size: 18px;
+  }
+
+  .modal-dialog {
+    max-width: 95%;
+    margin: 10px;
+  }
+
+  .modal-body {
+    padding: 16px;
+    max-height: 75vh;
+  }
+
+  .compliance-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- COMPACT MOBILE SCREENS (<= 480px) --- */
+@media (max-width: 480px) {
+  .main-content-area {
+    padding: 12px 8px 32px;
+  }
+
+  .composer-card,
+  .importer-card,
+  .campaign-setup-card,
+  .campaign-active-header-card,
+  .active-contact-card,
+  .campaign-queue-card,
+  .contacts-list-card {
+    padding: 14px 12px;
+    border-radius: 10px;
+  }
+
+  .whatsapp-screen {
+    height: 390px;
+    border-width: 2px;
+    border-radius: 14px;
+  }
+
+  .phone-input-combo {
+    width: 100%;
+  }
+
+  .country-select-btn {
+    padding: 0 8px;
+    font-size: 12.5px;
+  }
+
+  .country-dropdown-menu {
+    width: calc(100vw - 40px);
+    max-width: 280px;
+  }
+
+  .phone-number-input {
+    font-size: 13.5px;
+  }
+
+  .dispatch-engine-box {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+
+  .engine-pills {
+    width: 100%;
+  }
+
+  .engine-pill-btn {
+    flex: 1;
+    justify-content: center;
+    font-size: 11px;
+    padding: 6px 8px;
+  }
+
+  .campaign-mode-selector-banner {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .mode-card-btn {
+    padding: 12px;
+  }
+
+  .mode-btn-title {
+    font-size: 14px;
+  }
+
+  .delay-preset-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+  }
+
+  .preset-btn {
+    text-align: center;
+  }
+
+  .queue-card-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .status-filter-pills {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+
+  .status-filter-pills::-webkit-scrollbar {
+    display: none;
+  }
+
+  .filter-chip {
+    white-space: nowrap;
+    padding: 3px 8px;
+    font-size: 11px;
+  }
+
+  .templates-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .template-card {
+    padding: 14px;
+  }
+
+  .template-card-actions {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .btn-tmpl-action {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .footer-content {
+    flex-direction: column;
+    text-align: center;
+    gap: 8px;
+  }
+
+  .footer-links {
+    justify-content: center;
+  }
+}
