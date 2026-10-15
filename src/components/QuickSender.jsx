@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Send,
   RotateCcw,
@@ -15,7 +15,8 @@ import {
   Info,
   Globe,
   Smartphone,
-  Zap
+  Zap,
+  X
 } from 'lucide-react';
 import MessagePreview from './MessagePreview';
 import { COUNTRIES, DEFAULT_COUNTRY } from '../utils/countries';
@@ -36,6 +37,7 @@ export default function QuickSender({ onLogActivity, initialMessage = '' }) {
   const [successInfo, setSuccessInfo] = useState(null);
   const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
   const [countrySearch, setCountrySearch] = useState('');
+  const popupRef = useRef(null);
 
   // Format text helper
   const insertFormatting = (tagStart, tagEnd = tagStart) => {
@@ -137,9 +139,34 @@ export default function QuickSender({ onLogActivity, initialMessage = '' }) {
     // 3. Construct WhatsApp URL using direct engine (bypasses intermediate landing page)
     const waUrl = generateWhatsAppUrl(cleanPhone, finalMessage, dispatchEngine);
 
-    // 4. Open in WhatsApp Web / App directly
-    const windowTarget = reuseTab ? 'whatsapp_direct_window' : '_blank';
-    window.open(waUrl, windowTarget, 'noopener,noreferrer');
+    // 4. Open in dedicated popup window
+    if (popupRef.current && !popupRef.current.closed) {
+      try {
+        popupRef.current.close();
+      } catch {}
+    }
+
+    const screenWidth = window.screen.availWidth || 1280;
+    const screenHeight = window.screen.availHeight || 800;
+    const width = Math.min(1040, Math.floor(screenWidth * 0.78));
+    const height = Math.min(780, Math.floor(screenHeight * 0.86));
+    const left = Math.max(10, Math.floor((screenWidth - width) / 2));
+    const top = Math.max(10, Math.floor((screenHeight - height) / 2));
+
+    let win = null;
+    try {
+      win = window.open(
+        waUrl,
+        'whatsapp_quick_popup',
+        `width=${width},height=${height},left=${left},top=${top},status=no,toolbar=no,menubar=no,location=yes,resizable=yes,scrollbars=yes`
+      );
+      if (win) {
+        popupRef.current = win;
+        try { win.focus(); } catch {}
+      }
+    } catch {
+      win = window.open(waUrl, '_blank');
+    }
 
     // 5. Provide feedback and log activity
     const successDetails = {
@@ -149,7 +176,7 @@ export default function QuickSender({ onLogActivity, initialMessage = '' }) {
       messagePreview: finalMessage.substring(0, 80) + (finalMessage.length > 80 ? '...' : ''),
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       url: waUrl,
-      engine: dispatchEngine === 'web' ? 'Direct WhatsApp Web' : dispatchEngine === 'app' ? 'WhatsApp Desktop App' : 'wa.me'
+      engine: 'WhatsApp Web Popup'
     };
 
     setSuccessInfo(successDetails);
@@ -323,6 +350,17 @@ export default function QuickSender({ onLogActivity, initialMessage = '' }) {
                   >
                     Reopen in WhatsApp <ExternalLink size={12} />
                   </a>
+                  <button
+                    type="button"
+                    className="text-xs text-rose-600 hover:underline flex items-center gap-1 font-medium ml-2"
+                    onClick={() => {
+                      if (popupRef.current && !popupRef.current.closed) {
+                        popupRef.current.close();
+                      }
+                    }}
+                  >
+                    <X size={12} /> Close Popup Window
+                  </button>
                   <span className="text-xs text-slate-500">
                     Mode: {successInfo.engine}
                   </span>

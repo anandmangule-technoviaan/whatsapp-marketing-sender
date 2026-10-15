@@ -23,7 +23,10 @@ import {
   Smartphone,
   Sliders,
   FastForward,
-  HelpCircle
+  HelpCircle,
+  X,
+  Keyboard,
+  Maximize2
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import MessagePreview from './MessagePreview';
@@ -71,10 +74,13 @@ export default function CampaignManager({
   const [defaultCountry, setDefaultCountry] = useState(DEFAULT_COUNTRY);
   const [includeOptOut, setIncludeOptOut] = useState(false);
 
-  // Auto-Pilot Configuration
-  const [autoDelaySeconds, setAutoDelaySeconds] = useState(7);
+  // Auto-Pilot & Window Configuration
+  const [autoDelaySeconds, setAutoDelaySeconds] = useState(30); // 30s message gap per user request
   const [dispatchEngine, setDispatchEngine] = useState('web'); // 'web' (Direct WhatsApp Web) | 'app' | 'universal'
+  const [windowMode, setWindowMode] = useState('popup'); // 'popup' (Auto-close popup) | 'tab' (Reused tab)
   const [reuseWindow, setReuseWindow] = useState(true);
+  const [autoOpenOnNext, setAutoOpenOnNext] = useState(true); // Automatically open WhatsApp popup when next contact is selected
+  const [popupBlocked, setPopupBlocked] = useState(false);
 
   // Active Campaign State
   const [isCampaignActive, setIsCampaignActive] = useState(false);
@@ -91,6 +97,26 @@ export default function CampaignManager({
   const [statusFilter, setStatusFilter] = useState('all');
 
   const timerRef = useRef(null);
+  const popupRef = useRef(null);
+
+  // Safely close the current WhatsApp popup window if open
+  const closeCurrentPopup = () => {
+    if (popupRef.current && !popupRef.current.closed) {
+      try {
+        popupRef.current.close();
+      } catch (err) {
+        console.warn('Unable to close popup window:', err);
+      }
+    }
+  };
+
+  // Close popup window when component unmounts
+  useEffect(() => {
+    return () => {
+      closeCurrentPopup();
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
 
   // Update recipient source when contacts change
   useEffect(() => {
@@ -168,6 +194,49 @@ export default function CampaignManager({
     ? parseMessageWithVariables(messageTemplate, currentRecipient)
     : messageTemplate;
 
+  // Open WhatsApp in a controlled popup window or reused browser tab
+  const openWhatsAppWindow = (waUrl) => {
+    // Always close previous popup window to prevent clutter and duplicate sessions
+    closeCurrentPopup();
+
+    if (windowMode === 'popup') {
+      // Calculate centered coordinates for popup window
+      const screenWidth = window.screen.availWidth || 1280;
+      const screenHeight = window.screen.availHeight || 800;
+      const width = Math.min(1040, Math.floor(screenWidth * 0.78));
+      const height = Math.min(780, Math.floor(screenHeight * 0.86));
+      const left = Math.max(10, Math.floor((screenWidth - width) / 2));
+      const top = Math.max(10, Math.floor((screenHeight - height) / 2));
+
+      const windowFeatures = `width=${width},height=${height},left=${left},top=${top},status=no,toolbar=no,menubar=no,location=yes,resizable=yes,scrollbars=yes`;
+
+      let win = null;
+      try {
+        // Open without 'noopener' so we retain handle to close and navigate it
+        win = window.open(waUrl, 'whatsapp_campaign_popup', windowFeatures);
+      } catch (err) {
+        console.error('Error opening popup:', err);
+      }
+
+      if (!win || win.closed || typeof win.closed === 'undefined') {
+        setPopupBlocked(true);
+      } else {
+        setPopupBlocked(false);
+        popupRef.current = win;
+        try {
+          win.focus();
+        } catch {}
+      }
+      return win;
+    } else {
+      // Reused single browser tab
+      const targetName = reuseWindow ? 'whatsapp_campaign_dispatch' : '_blank';
+      const win = window.open(waUrl, targetName);
+      popupRef.current = win;
+      return win;
+    }
+  };
+
   // Dispatch message helper
   const dispatchCurrentRecipient = (recIndex, recList) => {
     const targetRec = recList[recIndex];
@@ -176,16 +245,19 @@ export default function CampaignManager({
     const personalized = parseMessageWithVariables(messageTemplate, targetRec);
     const waUrl = generateWhatsAppUrl(targetRec.phone, personalized, dispatchEngine);
 
-    // Open directly in WhatsApp Web or App
-    const windowName = reuseWindow ? 'whatsapp_campaign_dispatch' : '_blank';
-    window.open(waUrl, windowName, 'noopener,noreferrer');
+    // Open WhatsApp in popup or tab
+    openWhatsAppWindow(waUrl);
     playDispatchChime();
 
     // Mark as Opened
     setRecipients((prev) =>
       prev.map((r, i) =>
         i === recIndex
-          ? { ...r, status: 'Opened', openedAt: new Date().toLocaleTimeString() }
+          ? {
+              ...r,
+              status: r.status === 'Completed' ? 'Completed' : 'Opened',
+              openedAt: r.openedAt || new Date().toLocaleTimeString()
+            }
           : r
       )
     );
@@ -201,6 +273,31 @@ export default function CampaignManager({
         timestamp: new Date().toISOString()
       });
     }
+  };
+
+  // Robust Next Recipient Index Finder
+  // Finds the next contact that is neither 'Completed' nor 'Skipped'
+  const getNextRecipientIndex = (currentIdx, list) => {
+    if (!list || list.length === 0) return -1;
+
+    // 1. Look for subsequent contacts that are unfinished
+    const nextIdx = list.findIndex(
+      (r, idx) => idx > currentIdx && r.status !== 'Completed' && r.status !== 'Skipped'
+    );
+    if (nextIdx !== -1) return nextIdx;
+
+    // 2. Wrap-around check from start for any unfinished contacts
+    const anyRemainingIdx = list.findIndex(
+      (r) => r.status !== 'Completed' && r.status !== 'Skipped'
+    );
+    if (anyRemainingIdx !== -1) return anyRemainingIdx;
+
+    // 3. Fallback: if user simply wants sequential next row
+    if (currentIdx + 1 < list.length) {
+      return currentIdx + 1;
+    }
+
+    return -1; // All contacts done
   };
 
   // Start campaign confirmation
@@ -233,12 +330,10 @@ export default function CampaignManager({
     setShowConfirmModal(false);
     setCountdown(autoDelaySeconds);
 
-    // If Auto-Pilot is enabled, immediately dispatch the first contact!
-    if (campaignMode === 'auto') {
-      setTimeout(() => {
-        dispatchCurrentRecipient(0, parsed);
-      }, 400);
-    }
+    // Immediately dispatch the first contact in popup window!
+    setTimeout(() => {
+      dispatchCurrentRecipient(0, parsed);
+    }, 400);
 
     if (onUpdateStats) {
       onUpdateStats({
@@ -270,112 +365,147 @@ export default function CampaignManager({
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isCampaignActive, campaignMode, isPaused, campaignCompleted, currentIndex, recipients, autoDelaySeconds]);
+  }, [isCampaignActive, campaignMode, isPaused, campaignCompleted, currentIndex, recipients, autoDelaySeconds, windowMode]);
 
-  // Auto-advance logic
+  // Auto-advance logic: Closes previous popup, marks as sent, and opens next
   const handleAutoAdvanceNext = () => {
-    if (!currentRecipient) return;
-
-    // 1. Mark current contact as Completed
-    const updated = recipients.map((r, i) =>
-      i === currentIndex
-        ? { ...r, status: 'Completed', completedAt: new Date().toLocaleTimeString() }
-        : r
-    );
-
-    setRecipients(updated);
-
-    // 2. Find next pending contact
-    const nextIdx = updated.findIndex((r, idx) => idx > currentIndex && r.status === 'Pending');
-
-    if (nextIdx !== -1) {
-      setCurrentIndex(nextIdx);
-      setCountdown(autoDelaySeconds);
-      // Dispatch next recipient in WhatsApp!
-      dispatchCurrentRecipient(nextIdx, updated);
-    } else {
-      // Check if any pending from start
-      const anyPending = updated.findIndex((r) => r.status === 'Pending');
-      if (anyPending !== -1) {
-        setCurrentIndex(anyPending);
-        setCountdown(autoDelaySeconds);
-        dispatchCurrentRecipient(anyPending, updated);
-      } else {
-        // Complete campaign!
-        setCampaignCompleted(true);
-        if (timerRef.current) clearInterval(timerRef.current);
-        try {
-          confetti({
-            particleCount: 120,
-            spread: 80,
-            origin: { y: 0.6 }
-          });
-        } catch {}
-      }
-    }
+    handleConfirmSentAndNext();
   };
 
-  // Manual trigger for opening WhatsApp
+  // Manual trigger for opening WhatsApp popup for current recipient
   const handleOpenWhatsAppManual = () => {
     dispatchCurrentRecipient(currentIndex, recipients);
   };
 
-  // Manual Confirm Sent & Next
+  // Confirm Sent & Close Popup & Auto Open Next
   const handleConfirmSentAndNext = () => {
     if (!currentRecipient) return;
 
+    // 1. Close active popup window immediately
+    closeCurrentPopup();
+
+    // 2. Mark current contact as Completed
     const updated = recipients.map((r, i) =>
       i === currentIndex
         ? { ...r, status: 'Completed', completedAt: new Date().toLocaleTimeString() }
         : r
     );
-
     setRecipients(updated);
-    advanceQueueManual(updated);
+
+    if (onUpdateStats) {
+      const compCount = updated.filter((r) => r.status === 'Completed').length;
+      onUpdateStats({ completed: compCount, pending: updated.length - compCount });
+    }
+
+    // 3. Find next recipient index
+    const nextIdx = getNextRecipientIndex(currentIndex, updated);
+
+    if (nextIdx !== -1) {
+      setCurrentIndex(nextIdx);
+      setCountdown(autoDelaySeconds);
+      // Clean 0.30 sec (300ms) transition gap before auto-opening next WhatsApp popup
+      setTimeout(() => {
+        dispatchCurrentRecipient(nextIdx, updated);
+      }, 300);
+    } else {
+      // Complete campaign!
+      setCampaignCompleted(true);
+      if (timerRef.current) clearInterval(timerRef.current);
+      try {
+        confetti({
+          particleCount: 120,
+          spread: 80,
+          origin: { y: 0.6 }
+        });
+      } catch {}
+    }
   };
 
-  // Manual Skip
+  // Skip Current & Close Popup & Open Next
   const handleSkipAndNext = () => {
     if (!currentRecipient) return;
+
+    closeCurrentPopup();
 
     const updated = recipients.map((r, i) =>
       i === currentIndex ? { ...r, status: 'Skipped' } : r
     );
     setRecipients(updated);
-    setCountdown(autoDelaySeconds);
-    advanceQueueManual(updated);
-  };
 
-  const advanceQueueManual = (latestRecipients) => {
-    const nextIdx = latestRecipients.findIndex((r, idx) => idx > currentIndex && r.status === 'Pending');
-
+    const nextIdx = getNextRecipientIndex(currentIndex, updated);
     if (nextIdx !== -1) {
       setCurrentIndex(nextIdx);
-      if (campaignMode === 'auto') {
-        dispatchCurrentRecipient(nextIdx, latestRecipients);
-      }
+      setCountdown(autoDelaySeconds);
+      setTimeout(() => {
+        dispatchCurrentRecipient(nextIdx, updated);
+      }, 300);
     } else {
-      const anyPending = latestRecipients.findIndex((r) => r.status === 'Pending');
-      if (anyPending !== -1) {
-        setCurrentIndex(anyPending);
-        if (campaignMode === 'auto') {
-          dispatchCurrentRecipient(anyPending, latestRecipients);
-        }
-      } else {
-        setCampaignCompleted(true);
-        try {
-          confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
-        } catch {}
+      setCampaignCompleted(true);
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+  };
+
+  // Pagination Next Button: Advances to next contact and auto-opens WhatsApp popup
+  const handleNextInQueue = () => {
+    if (currentIndex < recipients.length - 1) {
+      const nextIdx = currentIndex + 1;
+      closeCurrentPopup();
+      setCurrentIndex(nextIdx);
+      setCountdown(autoDelaySeconds);
+      if (autoOpenOnNext) {
+        setTimeout(() => {
+          dispatchCurrentRecipient(nextIdx, recipients);
+        }, 300);
       }
     }
   };
 
-  const handleJumpToRecipient = (idx) => {
-    if (idx >= 0 && idx < recipients.length) {
-      setCurrentIndex(idx);
+  // Pagination Previous Button: Closes popup and moves to previous contact
+  const handlePreviousInQueue = () => {
+    if (currentIndex > 0) {
+      const prevIdx = currentIndex - 1;
+      closeCurrentPopup();
+      setCurrentIndex(prevIdx);
       setCountdown(autoDelaySeconds);
+      if (autoOpenOnNext) {
+        setTimeout(() => {
+          dispatchCurrentRecipient(prevIdx, recipients);
+        }, 300);
+      }
     }
   };
+
+  // Direct Selection of a recipient from queue table
+  const handleJumpToRecipient = (idx) => {
+    if (idx >= 0 && idx < recipients.length) {
+      closeCurrentPopup();
+      setCurrentIndex(idx);
+      setCountdown(autoDelaySeconds);
+      if (autoOpenOnNext) {
+        setTimeout(() => {
+          dispatchCurrentRecipient(idx, recipients);
+        }, 300);
+      }
+    }
+  };
+
+  // Global Keyboard Shortcut: Space or Alt+N to confirm sent, close popup, and auto-open next!
+  useEffect(() => {
+    if (!isCampaignActive || campaignCompleted) return;
+
+    const handleKeyDown = (e) => {
+      const tag = e.target.tagName ? e.target.tagName.toLowerCase() : '';
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
+      if (e.code === 'Space' || (e.altKey && e.code === 'KeyN')) {
+        e.preventDefault();
+        handleConfirmSentAndNext();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isCampaignActive, campaignCompleted, currentIndex, recipients, autoDelaySeconds, windowMode, autoOpenOnNext]);
 
   // Variable insertion
   const insertVariable = (varName) => {
@@ -489,22 +619,23 @@ export default function CampaignManager({
               </div>
             </div>
 
-            {/* Auto-Pilot Speed & Settings (Visible when Auto mode is chosen) */}
+            {/* Auto-Pilot Speed & Message Gap Settings */}
             {campaignMode === 'auto' && (
               <div className="auto-pilot-settings-panel">
                 <div className="panel-headline">
                   <Sliders size={16} className="text-emerald-600" />
                   <span className="font-bold text-sm text-slate-800">
-                    Auto-Pilot Dispatch Delay: {autoDelaySeconds} seconds per contact
+                    Message Gap: {autoDelaySeconds} seconds between messages (Anti-Ban Safety Gap)
                   </span>
                 </div>
 
                 <div className="delay-preset-buttons">
                   {[
-                    { label: 'Turbo (4s)', sec: 4 },
-                    { label: 'Recommended (7s)', sec: 7 },
-                    { label: 'Safe (10s)', sec: 10 },
-                    { label: 'Relaxed (15s)', sec: 15 }
+                    { label: 'Turbo (5s)', sec: 5 },
+                    { label: 'Fast (15s)', sec: 15 },
+                    { label: 'Recommended Gap (30s)', sec: 30 },
+                    { label: 'Safe Anti-Ban (45s)', sec: 45 },
+                    { label: 'Ultra-Safe (60s)', sec: 60 }
                   ].map((preset) => (
                     <button
                       key={preset.sec}
@@ -520,20 +651,32 @@ export default function CampaignManager({
                 <div className="flex items-center gap-4 mt-2">
                   <input
                     type="range"
-                    min="3"
-                    max="25"
+                    min="5"
+                    max="90"
                     step="1"
                     value={autoDelaySeconds}
                     onChange={(e) => setAutoDelaySeconds(Number(e.target.value))}
                     className="delay-range-slider"
                   />
                   <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
-                    {autoDelaySeconds}s delay
+                    {autoDelaySeconds}s gap per message
                   </span>
                 </div>
 
-                {/* Dispatch Engine & Tab Options */}
+                {/* Dispatch Engine & Window Mode Options */}
                 <div className="auto-options-row">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-semibold text-slate-700">Display:</label>
+                    <select
+                      className="form-select text-xs py-1 px-2"
+                      value={windowMode}
+                      onChange={(e) => setWindowMode(e.target.value)}
+                    >
+                      <option value="popup">Popup Window (Auto-close & auto-open next)</option>
+                      <option value="tab">Single Browser Tab</option>
+                    </select>
+                  </div>
+
                   <div className="flex items-center gap-2">
                     <label className="text-xs font-semibold text-slate-700">Target:</label>
                     <select
@@ -550,11 +693,11 @@ export default function CampaignManager({
                   <label className="checkbox-label text-xs">
                     <input
                       type="checkbox"
-                      checked={reuseWindow}
-                      onChange={(e) => setReuseWindow(e.target.checked)}
+                      checked={autoOpenOnNext}
+                      onChange={(e) => setAutoOpenOnNext(e.target.checked)}
                       className="custom-checkbox"
                     />
-                    <span>Reuse single WhatsApp window (prevents tab clutter)</span>
+                    <span>Auto-open next WhatsApp popup on sent</span>
                   </label>
                 </div>
               </div>
@@ -928,9 +1071,9 @@ export default function CampaignManager({
                       <div className="flex items-start gap-2.5">
                         <Zap size={18} className="text-amber-500 shrink-0 mt-0.5" />
                         <div>
-                          <strong>Auto-Pilot Active:</strong> Messages are automatically pushed directly into WhatsApp Web.
+                          <strong>Auto-Pilot Active ({autoDelaySeconds}s Safety Gap):</strong> WhatsApp Web opens automatically in a clean popup for each recipient.
                           <div className="text-xs text-slate-500 mt-1">
-                            In WhatsApp Web, simply hit Enter or use our zero-click auto-clicker script to send hands-free!
+                            When sent, click <strong>"Confirm Sent & Next"</strong> (or wait {countdown}s) — the current popup will close, and the next contact will automatically open after a 0.30s transition!
                           </div>
                         </div>
                       </div>
@@ -938,15 +1081,36 @@ export default function CampaignManager({
                       <>
                         <div className="step-indicator">
                           <span className="step-badge">Step 1</span>
-                          <span>Click <strong>"Open WhatsApp Web Directly"</strong> to launch this customer's chat.</span>
+                          <span>WhatsApp Web opens in a popup window with pre-filled message.</span>
                         </div>
                         <div className="step-indicator">
                           <span className="step-badge">Step 2</span>
-                          <span>Click <strong>"Confirm Sent & Next"</strong> to record send confirmation and advance.</span>
+                          <span>Click <strong>"Confirm Sent & Next"</strong> (or press <kbd className="px-1 py-0.5 bg-slate-100 border rounded text-[11px] font-mono">Space</kbd>) to close the popup and auto-open the next contact!</span>
                         </div>
                       </>
                     )}
                   </div>
+
+                  {/* Browser Popup Blocked Warning */}
+                  {popupBlocked && (
+                    <div className="alert-box alert-warning animate-fade-in my-2">
+                      <AlertCircle size={18} className="text-amber-600 shrink-0" />
+                      <div>
+                        <strong>Browser Popup Blocked:</strong>
+                        <p className="text-xs text-slate-600 mt-0.5">
+                          Your browser prevented the WhatsApp popup from opening automatically. Click the button below to open, and choose "Always allow popups" in your address bar:
+                        </p>
+                        <button
+                          type="button"
+                          className="btn-secondary text-xs mt-2 py-1 px-3"
+                          onClick={handleOpenWhatsAppManual}
+                        >
+                          <ExternalLink size={13} />
+                          <span>Open WhatsApp Popup Now</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Action Buttons */}
                   <div className="dispatch-actions-group">
@@ -954,10 +1118,10 @@ export default function CampaignManager({
                       type="button"
                       className="btn-send-whatsapp btn-large w-full"
                       onClick={handleOpenWhatsAppManual}
-                      title="Open WhatsApp Web directly with this message"
+                      title="Open or Re-open WhatsApp Web popup with this message"
                     >
                       <Send size={19} />
-                      <span>Re-Open Direct in WhatsApp Web</span>
+                      <span>Open WhatsApp Web in Popup</span>
                     </button>
 
                     <div className="dispatch-secondary-actions">
@@ -965,20 +1129,37 @@ export default function CampaignManager({
                         type="button"
                         className="btn-confirm-sent"
                         onClick={handleConfirmSentAndNext}
-                        title="Confirm that message was sent"
+                        title="Confirm that message was sent, close current popup, and auto-open next contact (or press Space)"
                       >
                         <CheckCheck size={18} />
-                        <span>Confirm Sent & Next</span>
+                        <span>Confirm Sent & Next →</span>
                       </button>
 
                       <button
                         type="button"
                         className="btn-skip-recipient"
                         onClick={handleSkipAndNext}
-                        title="Skip this recipient"
+                        title="Skip this recipient and open next"
                       >
                         <SkipForward size={16} />
                         <span>Skip</span>
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
+                      <div className="flex items-center gap-1.5">
+                        <Keyboard size={13} className="text-slate-400" />
+                        <span>Tip: Press <kbd className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 border rounded font-mono text-[11px] font-semibold">Space</kbd> or <kbd className="px-1.5 py-0.5 bg-slate-100 dark:bg-slate-800 border rounded font-mono text-[11px] font-semibold">Alt+N</kbd> to Send & Next</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        className="text-xs text-rose-600 hover:underline flex items-center gap-1"
+                        onClick={closeCurrentPopup}
+                        title="Close active WhatsApp popup window"
+                      >
+                        <X size={12} />
+                        <span>Close Popup</span>
                       </button>
                     </div>
                   </div>
@@ -988,8 +1169,9 @@ export default function CampaignManager({
                     <button
                       type="button"
                       className="btn-queue-nav"
-                      onClick={() => handleJumpToRecipient(currentIndex - 1)}
+                      onClick={handlePreviousInQueue}
                       disabled={currentIndex === 0}
+                      title="Go to previous recipient and open chat"
                     >
                       <ChevronLeft size={16} />
                       <span>Previous</span>
@@ -1000,8 +1182,9 @@ export default function CampaignManager({
                     <button
                       type="button"
                       className="btn-queue-nav"
-                      onClick={() => handleJumpToRecipient(currentIndex + 1)}
+                      onClick={handleNextInQueue}
                       disabled={currentIndex === totalCount - 1}
+                      title="Go to next recipient and open chat"
                     >
                       <span>Next</span>
                       <ChevronRight size={16} />
