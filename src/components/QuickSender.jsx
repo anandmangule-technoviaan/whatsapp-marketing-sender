@@ -16,12 +16,16 @@ import {
   Globe,
   Smartphone,
   Zap,
-  X
+  X,
+  Image as ImageIcon,
+  UploadCloud,
+  ClipboardCopy,
+  Check
 } from 'lucide-react';
 import MessagePreview from './MessagePreview';
 import { COUNTRIES, DEFAULT_COUNTRY } from '../utils/countries';
 import { validatePhoneNumber, generateWhatsAppUrl } from '../utils/whatsapp';
-import { DEFAULT_TEMPLATES, OPT_OUT_SNIPPET } from '../utils/templates';
+import { DEFAULT_TEMPLATES, OPT_OUT_SNIPPET, MARKETING_BANNERS } from '../utils/templates';
 
 const QUICK_EMOJIS = ['🔥', '🚀', '🎉', '✨', '👋', '🛍️', '🎁', '🏷️', '📢', '⭐', '💬', '🤝'];
 
@@ -37,7 +41,44 @@ export default function QuickSender({ onLogActivity, initialMessage = '' }) {
   const [successInfo, setSuccessInfo] = useState(null);
   const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
   const [countrySearch, setCountrySearch] = useState('');
+  const [mediaImage, setMediaImage] = useState(null);
+  const [mediaImageName, setMediaImageName] = useState('');
+  const [imageCopiedToast, setImageCopiedToast] = useState(false);
   const popupRef = useRef(null);
+
+  const copyImageToClipboard = async (imgSrc = mediaImage) => {
+    if (!imgSrc) return;
+    try {
+      const res = await fetch(imgSrc);
+      const blob = await res.blob();
+      if (navigator.clipboard && navigator.clipboard.write) {
+        await navigator.clipboard.write([
+          new ClipboardItem({ [blob.type || 'image/png']: blob })
+        ]);
+        setImageCopiedToast(true);
+        setTimeout(() => setImageCopiedToast(false), 3500);
+      }
+    } catch (err) {
+      console.warn('Clipboard write error:', err);
+    }
+  };
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file (PNG, JPG, WebP, GIF)');
+      return;
+    }
+    setMediaImageName(file.name);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target.result;
+      setMediaImage(result);
+      copyImageToClipboard(result);
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Format text helper
   const insertFormatting = (tagStart, tagEnd = tagStart) => {
@@ -98,11 +139,13 @@ export default function QuickSender({ onLogActivity, initialMessage = '' }) {
   };
 
   const handleClear = () => {
-    if (phoneNumber || message) {
-      if (window.confirm('Are you sure you want to clear the phone number and message?')) {
+    if (phoneNumber || message || mediaImage) {
+      if (window.confirm('Are you sure you want to clear the phone number, message, and attached image?')) {
         setPhoneNumber('');
         setRecipientName('');
         setMessage('');
+        setMediaImage(null);
+        setMediaImageName('');
         setValidationError('');
         setSuccessInfo(null);
       }
@@ -110,6 +153,8 @@ export default function QuickSender({ onLogActivity, initialMessage = '' }) {
       setPhoneNumber('');
       setRecipientName('');
       setMessage('');
+      setMediaImage(null);
+      setMediaImageName('');
       setValidationError('');
       setSuccessInfo(null);
     }
@@ -138,6 +183,11 @@ export default function QuickSender({ onLogActivity, initialMessage = '' }) {
 
     // 3. Construct WhatsApp URL using direct engine (bypasses intermediate landing page)
     const waUrl = generateWhatsAppUrl(cleanPhone, finalMessage, dispatchEngine);
+
+    // Auto-copy media image flyer to clipboard for Ctrl+V
+    if (mediaImage) {
+      copyImageToClipboard(mediaImage);
+    }
 
     // 4. Open in dedicated popup window
     if (popupRef.current && !popupRef.current.closed) {
@@ -467,6 +517,112 @@ export default function QuickSender({ onLogActivity, initialMessage = '' }) {
             </div>
           </div>
 
+          {/* Marketing Image / Flyer Attachment Section */}
+          <div className="campaign-media-section">
+            <div className="media-section-header">
+              <div className="flex items-center gap-2">
+                <ImageIcon size={18} className="text-emerald-600" />
+                <span className="font-semibold text-sm text-slate-800">
+                  Attach Promotional Image / Flyer <span className="label-optional">(Optional)</span>
+                </span>
+              </div>
+              {mediaImage && (
+                <button
+                  type="button"
+                  className="text-xs text-rose-600 hover:underline flex items-center gap-1 font-medium"
+                  onClick={() => {
+                    setMediaImage(null);
+                    setMediaImageName('');
+                  }}
+                >
+                  <X size={13} />
+                  <span>Remove Image</span>
+                </button>
+              )}
+            </div>
+
+            {!mediaImage ? (
+              <div className="media-upload-container">
+                <div className="upload-dropzone-box">
+                  <UploadCloud size={28} className="text-emerald-600 mb-2" />
+                  <label className="btn-primary text-xs py-1.5 px-4 cursor-pointer inline-flex items-center gap-2">
+                    <ImageIcon size={14} />
+                    <span>Upload Image from Computer</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleImageUpload}
+                    />
+                  </label>
+                  <p className="text-xs text-slate-400 mt-2">
+                    Supports PNG, JPG, WebP. Auto-copied to clipboard for <strong>Ctrl + V</strong> in WhatsApp!
+                  </p>
+                </div>
+
+                {/* Preset Banners */}
+                <div className="sample-banners-wrapper mt-3">
+                  <span className="text-xs font-semibold text-slate-600">
+                    Or Pick a Ready Marketing Banner:
+                  </span>
+                  <div className="banners-preset-grid mt-2">
+                    {MARKETING_BANNERS.map((banner) => (
+                      <button
+                        key={banner.id}
+                        type="button"
+                        className="banner-preset-card"
+                        onClick={() => {
+                          setMediaImage(banner.dataUrl);
+                          setMediaImageName(banner.name);
+                          copyImageToClipboard(banner.dataUrl);
+                        }}
+                      >
+                        <img src={banner.dataUrl} alt={banner.title} className="banner-thumb-img" />
+                        <span className="banner-title-text">{banner.title}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="media-active-card">
+                <div className="media-active-thumb">
+                  <img src={mediaImage} alt="Marketing Flyer" className="active-flyer-img" />
+                </div>
+                <div className="media-active-meta">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold text-slate-800">{mediaImageName || 'Promotional_Flyer.png'}</span>
+                    <span className="status-badge-pill badge-completed text-[11px]">
+                      <Check size={12} /> Ready on Clipboard
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Image is primed on your clipboard. When WhatsApp Web opens, simply press <kbd className="px-1 py-0.5 bg-slate-100 border rounded font-mono text-[11px] font-bold">Ctrl + V</kbd> to paste the flyer!
+                  </p>
+                  <div className="flex items-center gap-3 mt-3">
+                    <button
+                      type="button"
+                      className="btn-control-secondary text-xs py-1 px-3"
+                      onClick={() => copyImageToClipboard(mediaImage)}
+                    >
+                      <ClipboardCopy size={13} />
+                      <span>{imageCopiedToast ? 'Copied to Clipboard! ✓' : 'Copy Image (Ctrl+V)'}</span>
+                    </button>
+                    <label className="text-xs text-emerald-700 hover:underline cursor-pointer font-medium">
+                      Change Image
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleImageUpload}
+                      />
+                    </label>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Dispatch Target Engine Switcher (Direct WhatsApp Web vs App vs wa.me) */}
           <div className="dispatch-engine-box">
             <span className="dispatch-engine-label">
@@ -549,6 +705,7 @@ export default function QuickSender({ onLogActivity, initialMessage = '' }) {
               ? `${selectedCountry.dialCode} ${phoneNumber}`
               : `${selectedCountry.dialCode} 9876543210`
           }
+          mediaImage={mediaImage}
         />
       </div>
     </div>

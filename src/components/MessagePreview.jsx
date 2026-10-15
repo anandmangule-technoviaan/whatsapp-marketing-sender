@@ -83,7 +83,8 @@ export default function MessagePreview({
   message = '',
   recipientName = 'Customer',
   recipientPhone = '',
-  currentTime = '11:45 AM'
+  currentTime = '11:45 AM',
+  mediaImage = null
 }) {
   const charCount = message.length;
   const wordCount = message.trim() ? message.trim().split(/\s+/).length : 0;
@@ -96,6 +97,11 @@ export default function MessagePreview({
           <span>Live WhatsApp Preview</span>
         </div>
         <div className="preview-stats">
+          {mediaImage && (
+            <span className="stat-pill bg-emerald-100 text-emerald-700 font-semibold border-emerald-300">
+              🖼️ Image Flyer
+            </span>
+          )}
           <span className="stat-pill">{charCount} chars</span>
           <span className="stat-pill">{wordCount} words</span>
         </div>
@@ -141,12 +147,19 @@ export default function MessagePreview({
             <span>🔒 Messages are end-to-end encrypted. No one outside of this chat can read or listen to them.</span>
           </div>
 
-          {message ? (
+          {message || mediaImage ? (
             <div className="chat-bubble-row sender-row">
               <div className="chat-bubble sender-bubble">
-                <div className="bubble-content">
-                  {renderFormattedWhatsAppText(message)}
-                </div>
+                {mediaImage && (
+                  <div className="whatsapp-media-preview-box">
+                    <img src={mediaImage} alt="Marketing Attachment" className="whatsapp-bubble-img" />
+                  </div>
+                )}
+                {message && (
+                  <div className="bubble-content">
+                    {renderFormattedWhatsAppText(message)}
+                  </div>
+                )}
                 <div className="bubble-meta">
                   <span className="bubble-time">{currentTime}</span>
                   <span className="bubble-ticks" title="Read receipts">
@@ -157,7 +170,7 @@ export default function MessagePreview({
             </div>
           ) : (
             <div className="empty-preview-prompt">
-              <p>Type your message on the left to see the instant live preview here ✨</p>
+              <p>Type your message on the left or attach an image flyer to see the instant live preview here ✨</p>
               <span className="hint-text">Supports *bold*, _italic_, ~strikethrough~, and links</span>
             </div>
           )}

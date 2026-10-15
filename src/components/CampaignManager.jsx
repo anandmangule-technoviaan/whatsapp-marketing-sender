@@ -26,13 +26,17 @@ import {
   HelpCircle,
   X,
   Keyboard,
-  Maximize2
+  Maximize2,
+  Image as ImageIcon,
+  UploadCloud,
+  ClipboardCopy,
+  Check
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import MessagePreview from './MessagePreview';
 import AutoSendGuideModal from './AutoSendGuideModal';
 import { cleanPhoneNumber, validatePhoneNumber, generateWhatsAppUrl, parseMessageWithVariables } from '../utils/whatsapp';
-import { DEFAULT_TEMPLATES, OPT_OUT_SNIPPET } from '../utils/templates';
+import { DEFAULT_TEMPLATES, OPT_OUT_SNIPPET, MARKETING_BANNERS } from '../utils/templates';
 import { COUNTRIES, DEFAULT_COUNTRY } from '../utils/countries';
 
 // Gentle web audio chime synthesizer for dispatch notification
@@ -74,6 +78,11 @@ export default function CampaignManager({
   const [defaultCountry, setDefaultCountry] = useState(DEFAULT_COUNTRY);
   const [includeOptOut, setIncludeOptOut] = useState(false);
 
+  // Marketing Image / Flyer State
+  const [campaignImage, setCampaignImage] = useState(null); // Data URL or Image URL
+  const [campaignImageName, setCampaignImageName] = useState('');
+  const [imageCopiedNotice, setImageCopiedNotice] = useState(false);
+
   // Auto-Pilot & Window Configuration
   const [autoDelaySeconds, setAutoDelaySeconds] = useState(30); // 30s message gap per user request
   const [dispatchEngine, setDispatchEngine] = useState('web'); // 'web' (Direct WhatsApp Web) | 'app' | 'universal'
@@ -98,6 +107,44 @@ export default function CampaignManager({
 
   const timerRef = useRef(null);
   const popupRef = useRef(null);
+
+  // Copy promotional image to clipboard so user can press Ctrl+V in WhatsApp chat
+  const copyImageToClipboard = async (imgSrc = campaignImage) => {
+    if (!imgSrc) return;
+    try {
+      const res = await fetch(imgSrc);
+      const blob = await res.blob();
+      if (navigator.clipboard && navigator.clipboard.write) {
+        await navigator.clipboard.write([
+          new ClipboardItem({ [blob.type || 'image/png']: blob })
+        ]);
+        setImageCopiedNotice(true);
+        setTimeout(() => setImageCopiedNotice(false), 3500);
+      }
+    } catch (err) {
+      console.warn('Could not copy image to clipboard:', err);
+    }
+  };
+
+  // Handle image file selection
+  const handleImageUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please select a valid image file (PNG, JPG, WebP, GIF)');
+      return;
+    }
+
+    setCampaignImageName(file.name);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target.result;
+      setCampaignImage(result);
+      copyImageToClipboard(result);
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Safely close the current WhatsApp popup window if open
   const closeCurrentPopup = () => {
@@ -244,6 +291,11 @@ export default function CampaignManager({
 
     const personalized = parseMessageWithVariables(messageTemplate, targetRec);
     const waUrl = generateWhatsAppUrl(targetRec.phone, personalized, dispatchEngine);
+
+    // If a marketing image flyer is attached, automatically copy to clipboard for Ctrl+V in WhatsApp
+    if (campaignImage) {
+      copyImageToClipboard(campaignImage);
+    }
 
     // Open WhatsApp in popup or tab
     openWhatsAppWindow(waUrl);
@@ -864,6 +916,112 @@ export default function CampaignManager({
               </div>
             </div>
 
+            {/* Campaign Marketing Image / Flyer Attachment Section */}
+            <div className="campaign-media-section">
+              <div className="media-section-header">
+                <div className="flex items-center gap-2">
+                  <ImageIcon size={18} className="text-emerald-600" />
+                  <span className="font-semibold text-sm text-slate-800">
+                    Campaign Marketing Image / Flyer <span className="label-optional">(Optional)</span>
+                  </span>
+                </div>
+                {campaignImage && (
+                  <button
+                    type="button"
+                    className="text-xs text-rose-600 hover:underline flex items-center gap-1 font-medium"
+                    onClick={() => {
+                      setCampaignImage(null);
+                      setCampaignImageName('');
+                    }}
+                  >
+                    <X size={13} />
+                    <span>Remove Flyer</span>
+                  </button>
+                )}
+              </div>
+
+              {!campaignImage ? (
+                <div className="media-upload-container">
+                  <div className="upload-dropzone-box">
+                    <UploadCloud size={30} className="text-emerald-600 mb-2" />
+                    <label className="btn-primary text-xs py-1.5 px-4 cursor-pointer inline-flex items-center gap-2">
+                      <ImageIcon size={14} />
+                      <span>Upload Image / Flyer from Computer</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleImageUpload}
+                      />
+                    </label>
+                    <p className="text-xs text-slate-400 mt-2">
+                      Supports PNG, JPG, WebP, GIF. Auto-copied to clipboard for instant <strong>Ctrl + V</strong> in WhatsApp!
+                    </p>
+                  </div>
+
+                  {/* Preset High-Converting Marketing Banners */}
+                  <div className="sample-banners-wrapper mt-3">
+                    <span className="text-xs font-semibold text-slate-600">
+                      Or Choose a Ready-to-Send Marketing Banner:
+                    </span>
+                    <div className="banners-preset-grid mt-2">
+                      {MARKETING_BANNERS.map((banner) => (
+                        <button
+                          key={banner.id}
+                          type="button"
+                          className="banner-preset-card"
+                          onClick={() => {
+                            setCampaignImage(banner.dataUrl);
+                            setCampaignImageName(banner.name);
+                            copyImageToClipboard(banner.dataUrl);
+                          }}
+                        >
+                          <img src={banner.dataUrl} alt={banner.title} className="banner-thumb-img" />
+                          <span className="banner-title-text">{banner.title}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="media-active-card">
+                  <div className="media-active-thumb">
+                    <img src={campaignImage} alt="Campaign Flyer" className="active-flyer-img" />
+                  </div>
+                  <div className="media-active-meta">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-slate-800">{campaignImageName || 'Campaign_Banner.png'}</span>
+                      <span className="status-badge-pill badge-completed text-[11px]">
+                        <Check size={12} /> Ready on Clipboard
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1">
+                      This promotional image will be automatically copied to your clipboard when dispatching. When WhatsApp Web opens, simply press <kbd className="px-1 py-0.5 bg-slate-100 border rounded font-mono text-[11px] font-bold">Ctrl + V</kbd> to paste!
+                    </p>
+                    <div className="flex items-center gap-3 mt-3">
+                      <button
+                        type="button"
+                        className="btn-control-secondary text-xs py-1 px-3"
+                        onClick={() => copyImageToClipboard(campaignImage)}
+                      >
+                        <ClipboardCopy size={13} />
+                        <span>{imageCopiedNotice ? 'Copied to Clipboard! ✓' : 'Copy Image (Ctrl+V)'}</span>
+                      </button>
+                      <label className="text-xs text-emerald-700 hover:underline cursor-pointer font-medium">
+                        Change Image
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={handleImageUpload}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {setupError && (
               <div className="alert-box alert-error">
                 <AlertCircle size={18} />
@@ -1112,6 +1270,27 @@ export default function CampaignManager({
                     </div>
                   )}
 
+                  {/* Attached Marketing Flyer Alert Bar */}
+                  {campaignImage && (
+                    <div className="alert-box alert-info flex items-center justify-between py-2 px-3 mb-3 text-xs">
+                      <div className="flex items-center gap-2">
+                        <ImageIcon size={16} className="text-emerald-600 shrink-0" />
+                        <span>
+                          <strong>Flyer Attached:</strong> Automatically copied to clipboard! In WhatsApp popup, press <kbd className="px-1 py-0.5 bg-white dark:bg-slate-800 border rounded font-mono text-[11px] font-bold">Ctrl + V</kbd> to paste.
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-secondary text-[11px] py-0.5 px-2.5 shrink-0"
+                        onClick={() => copyImageToClipboard(campaignImage)}
+                        title="Re-copy image to clipboard"
+                      >
+                        <ClipboardCopy size={12} />
+                        <span>{imageCopiedNotice ? 'Copied ✓' : 'Copy Flyer'}</span>
+                      </button>
+                    </div>
+                  )}
+
                   {/* Action Buttons */}
                   <div className="dispatch-actions-group">
                     <button
@@ -1212,6 +1391,7 @@ export default function CampaignManager({
                 message={currentPersonalizedMessage}
                 recipientName={currentRecipient?.name || 'Customer'}
                 recipientPhone={currentRecipient ? `+${currentRecipient.phone}` : ''}
+                mediaImage={campaignImage}
               />
             </div>
           </div>

@@ -2708,3 +2708,128 @@
 .btn-confirm-sent:active {
   transform: translateY(0);
 }
+
+/* =========================================================================
+   MARKETING IMAGE FLYER & MEDIA ATTACHMENTS
+   ========================================================================= */
+.whatsapp-media-preview-box {
+  margin: -8px -10px 8px -10px;
+  border-radius: 8px 8px 3px 3px;
+  overflow: hidden;
+  max-height: 220px;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.whatsapp-bubble-img {
+  width: 100%;
+  height: auto;
+  max-height: 220px;
+  object-fit: cover;
+  display: block;
+}
+
+.campaign-media-section {
+  background: var(--bg-card-subtle);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  margin-top: 16px;
+  margin-bottom: 20px;
+}
+
+.media-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.upload-dropzone-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 18px 14px;
+  background: var(--bg-card);
+  border: 1.5px dashed var(--border-color);
+  border-radius: var(--radius-md);
+  text-align: center;
+  transition: border-color var(--transition-fast);
+}
+
+.upload-dropzone-box:hover {
+  border-color: var(--wa-green);
+}
+
+.sample-banners-wrapper {
+  margin-top: 14px;
+}
+
+.banners-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 10px;
+}
+
+.banner-preset-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.banner-preset-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--wa-green);
+  box-shadow: var(--shadow-sm);
+}
+
+.banner-thumb-img {
+  width: 100%;
+  height: 68px;
+  object-fit: cover;
+  display: block;
+}
+
+.banner-title-text {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-main);
+  padding: 6px 8px;
+  line-height: 1.25;
+}
+
+.media-active-card {
+  display: flex;
+  gap: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  align-items: center;
+}
+
+.media-active-thumb {
+  width: 110px;
+  height: 72px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  shrink: 0;
+  background: #000000;
+}
+
+.active-flyer-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.media-active-meta {
+  flex: 1;
+  min-width: 0;
+}
