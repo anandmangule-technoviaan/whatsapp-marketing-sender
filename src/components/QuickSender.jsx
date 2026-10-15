@@ -12,7 +12,10 @@ import {
   Sparkles,
   ExternalLink,
   ChevronDown,
-  Info
+  Info,
+  Globe,
+  Smartphone,
+  Zap
 } from 'lucide-react';
 import MessagePreview from './MessagePreview';
 import { COUNTRIES, DEFAULT_COUNTRY } from '../utils/countries';
@@ -27,12 +30,14 @@ export default function QuickSender({ onLogActivity, initialMessage = '' }) {
   const [recipientName, setRecipientName] = useState('');
   const [message, setMessage] = useState(initialMessage || DEFAULT_TEMPLATES[0].content);
   const [includeOptOut, setIncludeOptOut] = useState(false);
+  const [dispatchEngine, setDispatchEngine] = useState('web'); // 'web' (Direct WhatsApp Web) | 'app' | 'universal'
+  const [reuseTab, setReuseTab] = useState(true);
   const [validationError, setValidationError] = useState('');
   const [successInfo, setSuccessInfo] = useState(null);
   const [countryDropdownOpen, setCountryDropdownOpen] = useState(false);
   const [countrySearch, setCountrySearch] = useState('');
 
-  // Format text helper: wrap selected text or insert markdown tag
+  // Format text helper
   const insertFormatting = (tagStart, tagEnd = tagStart) => {
     const textarea = document.getElementById('quick-message-textarea');
     if (!textarea) return;
@@ -129,12 +134,12 @@ export default function QuickSender({ onLogActivity, initialMessage = '' }) {
     const cleanPhone = validation.cleaned;
     const finalMessage = message.trim();
 
-    // 3. Construct Click-to-Chat URL
-    // Format: https://wa.me/PHONENUMBER?text=ENCODED_MESSAGE
-    const waUrl = generateWhatsAppUrl(cleanPhone, finalMessage);
+    // 3. Construct WhatsApp URL using direct engine (bypasses intermediate landing page)
+    const waUrl = generateWhatsAppUrl(cleanPhone, finalMessage, dispatchEngine);
 
-    // 4. Open in new tab or WhatsApp app
-    window.open(waUrl, '_blank', 'noopener,noreferrer');
+    // 4. Open in WhatsApp Web / App directly
+    const windowTarget = reuseTab ? 'whatsapp_direct_window' : '_blank';
+    window.open(waUrl, windowTarget, 'noopener,noreferrer');
 
     // 5. Provide feedback and log activity
     const successDetails = {
@@ -143,7 +148,8 @@ export default function QuickSender({ onLogActivity, initialMessage = '' }) {
       name: recipientName || 'Recipient',
       messagePreview: finalMessage.substring(0, 80) + (finalMessage.length > 80 ? '...' : ''),
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      url: waUrl
+      url: waUrl,
+      engine: dispatchEngine === 'web' ? 'Direct WhatsApp Web' : dispatchEngine === 'app' ? 'WhatsApp Desktop App' : 'wa.me'
     };
 
     setSuccessInfo(successDetails);
@@ -154,7 +160,7 @@ export default function QuickSender({ onLogActivity, initialMessage = '' }) {
         recipient: recipientName || `+${cleanPhone}`,
         phone: `+${cleanPhone}`,
         message: finalMessage,
-        status: 'Opened in WhatsApp',
+        status: `Opened in ${successDetails.engine}`,
         timestamp: new Date().toISOString()
       });
     }
@@ -305,7 +311,7 @@ export default function QuickSender({ onLogActivity, initialMessage = '' }) {
               <CheckCircle2 size={18} className="shrink-0 text-emerald-600" />
               <div className="alert-content">
                 <p>
-                  <strong>WhatsApp Conversation Opened!</strong> Message prepared for{' '}
+                  <strong>WhatsApp Conversation Opened Directly!</strong> Message prepared for{' '}
                   <span className="font-semibold">{successInfo.displayPhone}</span> ({successInfo.name}).
                 </p>
                 <div className="mt-1 flex items-center gap-3">
@@ -318,7 +324,7 @@ export default function QuickSender({ onLogActivity, initialMessage = '' }) {
                     Reopen in WhatsApp <ExternalLink size={12} />
                   </a>
                   <span className="text-xs text-slate-500">
-                    Remember to click the Send button inside WhatsApp to finish sending!
+                    Mode: {successInfo.engine}
                   </span>
                 </div>
               </div>
@@ -423,6 +429,42 @@ export default function QuickSender({ onLogActivity, initialMessage = '' }) {
             </div>
           </div>
 
+          {/* Dispatch Target Engine Switcher (Direct WhatsApp Web vs App vs wa.me) */}
+          <div className="dispatch-engine-box">
+            <span className="dispatch-engine-label">
+              <Zap size={14} className="text-amber-500" />
+              Launch Target:
+            </span>
+            <div className="engine-pills">
+              <button
+                type="button"
+                className={`engine-pill-btn ${dispatchEngine === 'web' ? 'active' : ''}`}
+                onClick={() => setDispatchEngine('web')}
+                title="Bypasses intermediate screen and opens WhatsApp Web chat directly"
+              >
+                <Globe size={13} />
+                <span>Direct WhatsApp Web (Auto-Opens)</span>
+              </button>
+              <button
+                type="button"
+                className={`engine-pill-btn ${dispatchEngine === 'app' ? 'active' : ''}`}
+                onClick={() => setDispatchEngine('app')}
+                title="Opens installed Windows/Mac WhatsApp desktop app directly"
+              >
+                <Smartphone size={13} />
+                <span>WhatsApp Desktop App</span>
+              </button>
+              <button
+                type="button"
+                className={`engine-pill-btn ${dispatchEngine === 'universal' ? 'active' : ''}`}
+                onClick={() => setDispatchEngine('universal')}
+                title="Standard wa.me universal redirect"
+              >
+                <span>wa.me</span>
+              </button>
+            </div>
+          </div>
+
           {/* Action Buttons: Send WhatsApp & Clear */}
           <div className="action-buttons-row">
             <button
@@ -442,7 +484,7 @@ export default function QuickSender({ onLogActivity, initialMessage = '' }) {
                 <path d="M12.031 6.172c-3.181 0-5.767 2.586-5.768 5.766-.001 1.298.38 2.27 1.019 3.287l-.711 2.598 2.669-.699c.969.54 1.772.82 2.791.82 3.181 0 5.768-2.587 5.768-5.767 0-3.18-2.587-5.765-5.768-5.765zm0 10.373c-.933 0-1.74-.271-2.438-.727l-.175-.114-1.579.414.421-1.54-.12-.191c-.496-.787-.79-1.538-.79-2.449 0-2.54 2.067-4.607 4.682-4.607 2.614 0 4.681 2.067 4.681 4.607 0 2.54-2.067 4.607-4.682 4.607z" />
                 <path d="M17.472 14.382c-.301-.15-1.782-.88-2.058-.98-.276-.1-.476-.15-.677.15-.201.3-.777.98-.953 1.18-.176.2-.352.225-.653.075-.301-.15-1.272-.469-2.423-1.496-.895-.798-1.5-1.784-1.676-2.085-.176-.3-.019-.462.132-.612.136-.135.301-.35.452-.525.15-.175.201-.3.301-.5.101-.2.05-.375-.025-.525s-.677-1.633-.928-2.238c-.244-.59-.493-.51-.677-.519l-.578-.01c-.201 0-.527.075-.803.375s-1.054 1.03-1.054 2.513 1.079 2.914 1.23 3.115c.15.2 2.124 3.243 5.145 4.549.718.311 1.279.497 1.716.636.721.23 1.377.197 1.896.12.578-.087 1.782-.728 2.033-1.431.251-.703.251-1.306.176-1.431-.076-.126-.276-.201-.577-.351z" />
               </svg>
-              <span>Send WhatsApp Message</span>
+              <span>Open Direct in WhatsApp</span>
             </button>
 
             <button

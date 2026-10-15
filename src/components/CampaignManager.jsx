@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Play,
   Pause,
@@ -17,13 +17,40 @@ import {
   Sparkles,
   Download,
   Info,
-  ListFilter
+  ListFilter,
+  Zap,
+  Globe,
+  Smartphone,
+  Sliders,
+  FastForward,
+  HelpCircle
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import MessagePreview from './MessagePreview';
+import AutoSendGuideModal from './AutoSendGuideModal';
 import { cleanPhoneNumber, validatePhoneNumber, generateWhatsAppUrl, parseMessageWithVariables } from '../utils/whatsapp';
 import { DEFAULT_TEMPLATES, OPT_OUT_SNIPPET } from '../utils/templates';
 import { COUNTRIES, DEFAULT_COUNTRY } from '../utils/countries';
+
+// Gentle web audio chime synthesizer for dispatch notification
+function playDispatchChime() {
+  try {
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // D5
+    osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.15); // A5
+    gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.3);
+  } catch {
+    // Audio context unavailable or blocked
+  }
+}
 
 export default function CampaignManager({
   contacts = [],
@@ -33,6 +60,7 @@ export default function CampaignManager({
 }) {
   // Campaign Setup State
   const [campaignName, setCampaignName] = useState('Marketing Campaign');
+  const [campaignMode, setCampaignMode] = useState('auto'); // 'auto' (Auto-Pilot) | 'manual'
   const [recipientSource, setRecipientSource] = useState(contacts.length > 0 ? 'imported' : 'manual');
   const [rawNumbersText, setRawNumbersText] = useState(
     '+91 9876543210, Rahul Verma\n+91 9823456789, Priya Patel\n+91 9712345678, Sneha Kulkarni'
@@ -43,17 +71,26 @@ export default function CampaignManager({
   const [defaultCountry, setDefaultCountry] = useState(DEFAULT_COUNTRY);
   const [includeOptOut, setIncludeOptOut] = useState(false);
 
+  // Auto-Pilot Configuration
+  const [autoDelaySeconds, setAutoDelaySeconds] = useState(7);
+  const [dispatchEngine, setDispatchEngine] = useState('web'); // 'web' (Direct WhatsApp Web) | 'app' | 'universal'
+  const [reuseWindow, setReuseWindow] = useState(true);
+
   // Active Campaign State
   const [isCampaignActive, setIsCampaignActive] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [recipients, setRecipients] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [campaignCompleted, setCampaignCompleted] = useState(false);
+  const [countdown, setCountdown] = useState(autoDelaySeconds);
 
-  // Modals & Confirmation
+  // Modals & UI helpers
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [showAutoSendModal, setShowAutoSendModal] = useState(false);
   const [setupError, setSetupError] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+
+  const timerRef = useRef(null);
 
   // Update recipient source when contacts change
   useEffect(() => {
@@ -85,7 +122,6 @@ export default function CampaignManager({
         }
       });
     } else {
-      // Manual input parser (supports: "9876543210", "+919876543210, Name", "Name <+919876543210>")
       const lines = rawNumbersText.split('\n');
       lines.forEach((line, idx) => {
         const trimmed = line.trim();
@@ -96,7 +132,6 @@ export default function CampaignManager({
 
         if (trimmed.includes(',')) {
           const parts = trimmed.split(',');
-          // If first part looks like phone
           if (/\d{7,}/.test(parts[0])) {
             phoneCandidate = parts[0].trim();
             name = parts.slice(1).join(',').trim();
@@ -128,6 +163,47 @@ export default function CampaignManager({
     return list;
   };
 
+  const currentRecipient = recipients[currentIndex] || null;
+  const currentPersonalizedMessage = currentRecipient
+    ? parseMessageWithVariables(messageTemplate, currentRecipient)
+    : messageTemplate;
+
+  // Dispatch message helper
+  const dispatchCurrentRecipient = (recIndex, recList) => {
+    const targetRec = recList[recIndex];
+    if (!targetRec) return;
+
+    const personalized = parseMessageWithVariables(messageTemplate, targetRec);
+    const waUrl = generateWhatsAppUrl(targetRec.phone, personalized, dispatchEngine);
+
+    // Open directly in WhatsApp Web or App
+    const windowName = reuseWindow ? 'whatsapp_campaign_dispatch' : '_blank';
+    window.open(waUrl, windowName, 'noopener,noreferrer');
+    playDispatchChime();
+
+    // Mark as Opened
+    setRecipients((prev) =>
+      prev.map((r, i) =>
+        i === recIndex
+          ? { ...r, status: 'Opened', openedAt: new Date().toLocaleTimeString() }
+          : r
+      )
+    );
+
+    if (onLogActivity) {
+      onLogActivity({
+        type: `Campaign ${campaignMode === 'auto' ? 'Auto-Dispatch' : 'Message'}`,
+        campaign: campaignName,
+        recipient: targetRec.name,
+        phone: `+${targetRec.phone}`,
+        message: personalized,
+        status: 'Opened in WhatsApp',
+        timestamp: new Date().toISOString()
+      });
+    }
+  };
+
+  // Start campaign confirmation
   const handleStartCampaignCheck = (e) => {
     e.preventDefault();
     setSetupError('');
@@ -143,10 +219,10 @@ export default function CampaignManager({
       return;
     }
 
-    // Open confirmation dialog
     setShowConfirmModal(true);
   };
 
+  // Initiate active campaign
   const handleConfirmStartCampaign = () => {
     const parsed = parseRecipients();
     setRecipients(parsed);
@@ -155,8 +231,15 @@ export default function CampaignManager({
     setIsPaused(false);
     setCampaignCompleted(false);
     setShowConfirmModal(false);
+    setCountdown(autoDelaySeconds);
 
-    // Update global stats
+    // If Auto-Pilot is enabled, immediately dispatch the first contact!
+    if (campaignMode === 'auto') {
+      setTimeout(() => {
+        dispatchCurrentRecipient(0, parsed);
+      }, 400);
+    }
+
     if (onUpdateStats) {
       onUpdateStats({
         totalInCampaign: parsed.length,
@@ -166,47 +249,34 @@ export default function CampaignManager({
     }
   };
 
-  const currentRecipient = recipients[currentIndex] || null;
-
-  // Personalized message for active contact
-  const currentPersonalizedMessage = currentRecipient
-    ? parseMessageWithVariables(messageTemplate, currentRecipient)
-    : messageTemplate;
-
-  // 1. Open WhatsApp Conversation
-  const handleOpenWhatsApp = () => {
-    if (!currentRecipient) return;
-
-    const url = generateWhatsAppUrl(currentRecipient.phone, currentPersonalizedMessage);
-    window.open(url, '_blank', 'noopener,noreferrer');
-
-    // Update recipient status to 'Opened' (WhatsApp opened, waiting for user manual confirmation)
-    setRecipients((prev) =>
-      prev.map((r, i) =>
-        i === currentIndex
-          ? { ...r, status: 'Opened', openedAt: new Date().toLocaleTimeString() }
-          : r
-      )
-    );
-
-    if (onLogActivity) {
-      onLogActivity({
-        type: 'Campaign Message',
-        campaign: campaignName,
-        recipient: currentRecipient.name,
-        phone: `+${currentRecipient.phone}`,
-        message: currentPersonalizedMessage,
-        status: 'Opened in WhatsApp',
-        timestamp: new Date().toISOString()
-      });
+  // ==================== AUTO-PILOT TIMER ENGINE ====================
+  useEffect(() => {
+    if (!isCampaignActive || campaignMode !== 'auto' || isPaused || campaignCompleted) {
+      if (timerRef.current) clearInterval(timerRef.current);
+      return;
     }
-  };
 
-  // 2. Confirm Sent & Move to Next
-  const handleConfirmSentAndNext = () => {
+    timerRef.current = setInterval(() => {
+      setCountdown((prevCount) => {
+        if (prevCount <= 1) {
+          // Timer expired -> Advance to next contact!
+          handleAutoAdvanceNext();
+          return autoDelaySeconds;
+        }
+        return prevCount - 1;
+      });
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isCampaignActive, campaignMode, isPaused, campaignCompleted, currentIndex, recipients, autoDelaySeconds]);
+
+  // Auto-advance logic
+  const handleAutoAdvanceNext = () => {
     if (!currentRecipient) return;
 
-    // Mark current as Completed
+    // 1. Mark current contact as Completed
     const updated = recipients.map((r, i) =>
       i === currentIndex
         ? { ...r, status: 'Completed', completedAt: new Date().toLocaleTimeString() }
@@ -215,23 +285,56 @@ export default function CampaignManager({
 
     setRecipients(updated);
 
-    if (onLogActivity) {
-      onLogActivity({
-        type: 'Campaign Message Confirmed',
-        campaign: campaignName,
-        recipient: currentRecipient.name,
-        phone: `+${currentRecipient.phone}`,
-        message: currentPersonalizedMessage,
-        status: 'Completed (Manually Confirmed)',
-        timestamp: new Date().toISOString()
-      });
-    }
+    // 2. Find next pending contact
+    const nextIdx = updated.findIndex((r, idx) => idx > currentIndex && r.status === 'Pending');
 
-    // Advance to next recipient if available
-    advanceQueue(updated);
+    if (nextIdx !== -1) {
+      setCurrentIndex(nextIdx);
+      setCountdown(autoDelaySeconds);
+      // Dispatch next recipient in WhatsApp!
+      dispatchCurrentRecipient(nextIdx, updated);
+    } else {
+      // Check if any pending from start
+      const anyPending = updated.findIndex((r) => r.status === 'Pending');
+      if (anyPending !== -1) {
+        setCurrentIndex(anyPending);
+        setCountdown(autoDelaySeconds);
+        dispatchCurrentRecipient(anyPending, updated);
+      } else {
+        // Complete campaign!
+        setCampaignCompleted(true);
+        if (timerRef.current) clearInterval(timerRef.current);
+        try {
+          confetti({
+            particleCount: 120,
+            spread: 80,
+            origin: { y: 0.6 }
+          });
+        } catch {}
+      }
+    }
   };
 
-  // 3. Skip contact
+  // Manual trigger for opening WhatsApp
+  const handleOpenWhatsAppManual = () => {
+    dispatchCurrentRecipient(currentIndex, recipients);
+  };
+
+  // Manual Confirm Sent & Next
+  const handleConfirmSentAndNext = () => {
+    if (!currentRecipient) return;
+
+    const updated = recipients.map((r, i) =>
+      i === currentIndex
+        ? { ...r, status: 'Completed', completedAt: new Date().toLocaleTimeString() }
+        : r
+    );
+
+    setRecipients(updated);
+    advanceQueueManual(updated);
+  };
+
+  // Manual Skip
   const handleSkipAndNext = () => {
     if (!currentRecipient) return;
 
@@ -239,40 +342,38 @@ export default function CampaignManager({
       i === currentIndex ? { ...r, status: 'Skipped' } : r
     );
     setRecipients(updated);
-    advanceQueue(updated);
+    setCountdown(autoDelaySeconds);
+    advanceQueueManual(updated);
   };
 
-  const advanceQueue = (latestRecipients) => {
-    // Find next pending or opened contact
+  const advanceQueueManual = (latestRecipients) => {
     const nextIdx = latestRecipients.findIndex((r, idx) => idx > currentIndex && r.status === 'Pending');
 
     if (nextIdx !== -1) {
       setCurrentIndex(nextIdx);
+      if (campaignMode === 'auto') {
+        dispatchCurrentRecipient(nextIdx, latestRecipients);
+      }
     } else {
-      // Check if any pending remaining from start
       const anyPending = latestRecipients.findIndex((r) => r.status === 'Pending');
       if (anyPending !== -1) {
         setCurrentIndex(anyPending);
+        if (campaignMode === 'auto') {
+          dispatchCurrentRecipient(anyPending, latestRecipients);
+        }
       } else {
-        // All contacts processed!
         setCampaignCompleted(true);
         try {
-          confetti({
-            particleCount: 100,
-            spread: 70,
-            origin: { y: 0.6 }
-          });
-        } catch (e) {
-          // ignore
-        }
+          confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+        } catch {}
       }
     }
   };
 
-  // Move back/forward manually
   const handleJumpToRecipient = (idx) => {
     if (idx >= 0 && idx < recipients.length) {
       setCurrentIndex(idx);
+      setCountdown(autoDelaySeconds);
     }
   };
 
@@ -281,7 +382,6 @@ export default function CampaignManager({
     setMessageTemplate((prev) => prev + ` {${varName}}`);
   };
 
-  // Opt out toggle
   const handleOptOutToggle = (checked) => {
     setIncludeOptOut(checked);
     if (checked) {
@@ -293,7 +393,7 @@ export default function CampaignManager({
     }
   };
 
-  // Statistics calculation
+  // Stats calculation
   const totalCount = recipients.length;
   const completedCount = recipients.filter((r) => r.status === 'Completed').length;
   const openedCount = recipients.filter((r) => r.status === 'Opened').length;
@@ -322,7 +422,6 @@ export default function CampaignManager({
     document.body.removeChild(link);
   };
 
-  // Filtered list for display in table
   const displayedRecipients = recipients.filter((r) => {
     if (statusFilter === 'all') return true;
     return r.status.toLowerCase() === statusFilter.toLowerCase();
@@ -337,17 +436,131 @@ export default function CampaignManager({
             <div>
               <h2 className="card-title">Bulk Marketing Campaigns</h2>
               <p className="card-subtitle">
-                Compose a shared marketing message and send to multiple recipients with step-by-step confirmation.
+                Automated or manual dispatch of marketing messages directly into WhatsApp.
               </p>
             </div>
-            <div className="compliance-shield-tag">
-              <ShieldAlert size={16} className="text-emerald-600" />
-              <span>Safe Step-by-Step WhatsApp Dispatch</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className="btn-control-secondary text-xs"
+                onClick={() => setShowAutoSendModal(true)}
+              >
+                <Zap size={14} className="text-amber-500" />
+                <span>Zero-Click Auto-Send Guide</span>
+              </button>
             </div>
           </div>
 
           <form onSubmit={handleStartCampaignCheck} className="space-y-6">
-            {/* Campaign Name */}
+            {/* Mode Switcher Banner: Auto-Pilot vs Manual */}
+            <div className="campaign-mode-selector-banner">
+              <div className="mode-option-col">
+                <button
+                  type="button"
+                  className={`mode-card-btn ${campaignMode === 'auto' ? 'active' : ''}`}
+                  onClick={() => setCampaignMode('auto')}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="mode-badge-recommended">Recommended</span>
+                    <Zap size={18} className="text-amber-500" />
+                  </div>
+                  <h3 className="mode-btn-title">⚡ Auto-Pilot Mode (Automatic)</h3>
+                  <p className="mode-btn-desc">
+                    Hands-free sequential dispatch. Automatically opens WhatsApp Web directly for each recipient with a timed delay.
+                  </p>
+                </button>
+              </div>
+
+              <div className="mode-option-col">
+                <button
+                  type="button"
+                  className={`mode-card-btn ${campaignMode === 'manual' ? 'active' : ''}`}
+                  onClick={() => setCampaignMode('manual')}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-slate-400 font-semibold uppercase">Step-by-Step</span>
+                    <Clock size={18} className="text-slate-400" />
+                  </div>
+                  <h3 className="mode-btn-title">Manual Guided Mode</h3>
+                  <p className="mode-btn-desc">
+                    You manually click "Open in WhatsApp" and "Confirm Sent & Next" for every contact.
+                  </p>
+                </button>
+              </div>
+            </div>
+
+            {/* Auto-Pilot Speed & Settings (Visible when Auto mode is chosen) */}
+            {campaignMode === 'auto' && (
+              <div className="auto-pilot-settings-panel">
+                <div className="panel-headline">
+                  <Sliders size={16} className="text-emerald-600" />
+                  <span className="font-bold text-sm text-slate-800">
+                    Auto-Pilot Dispatch Delay: {autoDelaySeconds} seconds per contact
+                  </span>
+                </div>
+
+                <div className="delay-preset-buttons">
+                  {[
+                    { label: 'Turbo (4s)', sec: 4 },
+                    { label: 'Recommended (7s)', sec: 7 },
+                    { label: 'Safe (10s)', sec: 10 },
+                    { label: 'Relaxed (15s)', sec: 15 }
+                  ].map((preset) => (
+                    <button
+                      key={preset.sec}
+                      type="button"
+                      className={`preset-btn ${autoDelaySeconds === preset.sec ? 'active' : ''}`}
+                      onClick={() => setAutoDelaySeconds(preset.sec)}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center gap-4 mt-2">
+                  <input
+                    type="range"
+                    min="3"
+                    max="25"
+                    step="1"
+                    value={autoDelaySeconds}
+                    onChange={(e) => setAutoDelaySeconds(Number(e.target.value))}
+                    className="delay-range-slider"
+                  />
+                  <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">
+                    {autoDelaySeconds}s delay
+                  </span>
+                </div>
+
+                {/* Dispatch Engine & Tab Options */}
+                <div className="auto-options-row">
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-semibold text-slate-700">Target:</label>
+                    <select
+                      className="form-select text-xs py-1 px-2"
+                      value={dispatchEngine}
+                      onChange={(e) => setDispatchEngine(e.target.value)}
+                    >
+                      <option value="web">Direct WhatsApp Web (web.whatsapp.com)</option>
+                      <option value="app">WhatsApp Desktop App (whatsapp://)</option>
+                      <option value="universal">Universal wa.me Router</option>
+                    </select>
+                  </div>
+
+                  <label className="checkbox-label text-xs">
+                    <input
+                      type="checkbox"
+                      checked={reuseWindow}
+                      onChange={(e) => setReuseWindow(e.target.checked)}
+                      className="custom-checkbox"
+                    />
+                    <span>Reuse single WhatsApp window (prevents tab clutter)</span>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* Campaign Name & Default Country */}
             <div className="form-grid-2">
               <div className="form-group">
                 <label htmlFor="campaign-name-input" className="form-label">
@@ -364,7 +577,6 @@ export default function CampaignManager({
                 />
               </div>
 
-              {/* Default Country for local numbers */}
               <div className="form-group">
                 <label className="form-label">Default Country Code</label>
                 <select
@@ -381,7 +593,6 @@ export default function CampaignManager({
                     </option>
                   ))}
                 </select>
-                <span className="field-hint">Used if numbers in list lack explicit '+' country prefix</span>
               </div>
             </div>
 
@@ -414,7 +625,7 @@ export default function CampaignManager({
                       <div>
                         <strong>{contacts.length} contacts loaded from Contact Book.</strong>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          Personalized tags like <code>{'{name}'}</code> will automatically pull customer names from the imported list.
+                          Personalized tags like <code>{'{name}'}</code> will automatically pull customer names from the list.
                         </p>
                       </div>
                     </div>
@@ -424,7 +635,7 @@ export default function CampaignManager({
                       <div>
                         <strong>No imported contacts available.</strong>
                         <p className="text-xs text-slate-600 mt-0.5">
-                          Switch to "Enter / Paste Numbers" or visit the "Contacts & CSV" tab to upload your CSV file.
+                          Switch to "Enter / Paste Numbers" or visit "Contacts & CSV" tab to upload your CSV file.
                         </p>
                       </div>
                     </div>
@@ -444,7 +655,7 @@ export default function CampaignManager({
                     onChange={(e) => setRawNumbersText(e.target.value)}
                   />
                   <span className="field-hint">
-                    Format: <code>Phone Number</code> or <code>Phone Number, Name</code>. Country code will be auto-formatted.
+                    Format: <code>Phone Number</code> or <code>Phone Number, Name</code>.
                   </span>
                 </div>
               )}
@@ -456,7 +667,6 @@ export default function CampaignManager({
                 <label htmlFor="campaign-message-textarea" className="form-label">
                   Shared Marketing Message
                 </label>
-                {/* Personalization Tags */}
                 <div className="variable-pills">
                   <span className="text-xs text-slate-500 font-medium mr-1">Insert tag:</span>
                   <button
@@ -488,7 +698,7 @@ export default function CampaignManager({
 
               <textarea
                 id="campaign-message-textarea"
-                rows={7}
+                rows={6}
                 className="form-textarea message-composer-box"
                 placeholder="Write your campaign broadcast message here..."
                 value={messageTemplate}
@@ -496,7 +706,6 @@ export default function CampaignManager({
                 required
               />
 
-              {/* Opt-out toggle */}
               <div className="composer-options-bar">
                 <label className="checkbox-label">
                   <input
@@ -521,9 +730,16 @@ export default function CampaignManager({
 
             {/* Start Campaign Trigger */}
             <div className="pt-2">
-              <button type="submit" className="btn-primary btn-large w-full">
-                <Play size={18} />
-                <span>Review & Start Campaign</span>
+              <button
+                type="submit"
+                className={`btn-primary btn-large w-full ${campaignMode === 'auto' ? 'btn-auto-pilot' : ''}`}
+              >
+                {campaignMode === 'auto' ? <Zap size={20} /> : <Play size={20} />}
+                <span>
+                  {campaignMode === 'auto'
+                    ? `Launch Auto-Pilot Campaign (${parseRecipients().length} Contacts)`
+                    : 'Review & Start Campaign'}
+                </span>
               </button>
             </div>
           </form>
@@ -531,31 +747,62 @@ export default function CampaignManager({
       ) : (
         /* ===================== ACTIVE CAMPAIGN EXECUTION SCREEN ===================== */
         <div className="active-campaign-layout">
-          {/* Top Campaign Bar with Progress & Controls */}
+          {/* Top Campaign Bar with Progress & Auto-Pilot Status */}
           <div className="campaign-active-header-card">
             <div className="campaign-meta-row">
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="campaign-active-title">{campaignName}</h2>
-                  <span className={`status-badge-pill ${isPaused ? 'badge-paused' : campaignCompleted ? 'badge-completed' : 'badge-running'}`}>
-                    {campaignCompleted ? 'Finished 🎉' : isPaused ? 'Paused ⏸' : 'In Progress ⚡'}
+                  <span
+                    className={`status-badge-pill ${
+                      campaignCompleted
+                        ? 'badge-completed'
+                        : isPaused
+                        ? 'badge-paused'
+                        : campaignMode === 'auto'
+                        ? 'badge-running-auto'
+                        : 'badge-running'
+                    }`}
+                  >
+                    {campaignCompleted
+                      ? 'Campaign Finished 🎉'
+                      : isPaused
+                      ? 'Paused ⏸'
+                      : campaignMode === 'auto'
+                      ? '⚡ Auto-Pilot Active'
+                      : 'In Progress'}
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 mt-1">
-                  Manual guided sender • Contact {currentIndex + 1} of {totalCount}
+                  Contact {currentIndex + 1} of {totalCount} •{' '}
+                  {campaignMode === 'auto' ? `Auto-Advancing every ${autoDelaySeconds}s` : 'Manual control'}
                 </p>
               </div>
 
               <div className="campaign-control-actions">
                 {!campaignCompleted && (
-                  <button
-                    type="button"
-                    className={`btn-control-pause ${isPaused ? 'btn-resume' : ''}`}
-                    onClick={() => setIsPaused(!isPaused)}
-                  >
-                    {isPaused ? <Play size={16} /> : <Pause size={16} />}
-                    <span>{isPaused ? 'Resume Campaign' : 'Pause'}</span>
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className={`btn-control-pause ${isPaused ? 'btn-resume' : ''}`}
+                      onClick={() => setIsPaused(!isPaused)}
+                    >
+                      {isPaused ? <Play size={16} /> : <Pause size={16} />}
+                      <span>{isPaused ? 'Resume Auto-Pilot' : 'Pause'}</span>
+                    </button>
+
+                    {campaignMode === 'auto' && (
+                      <button
+                        type="button"
+                        className="btn-control-fast"
+                        onClick={handleAutoAdvanceNext}
+                        title="Skip remaining timer and send next contact right now"
+                      >
+                        <FastForward size={16} />
+                        <span>Send Next Now</span>
+                      </button>
+                    )}
+                  </>
                 )}
 
                 <button
@@ -572,8 +819,9 @@ export default function CampaignManager({
                   type="button"
                   className="btn-control-danger"
                   onClick={() => {
-                    if (window.confirm('Are you sure you want to exit and end this campaign?')) {
+                    if (window.confirm('Are you sure you want to stop and exit this campaign?')) {
                       setIsCampaignActive(false);
+                      if (timerRef.current) clearInterval(timerRef.current);
                     }
                   }}
                   title="End Campaign"
@@ -583,6 +831,38 @@ export default function CampaignManager({
               </div>
             </div>
 
+            {/* Auto-Pilot Countdown Meter */}
+            {campaignMode === 'auto' && !campaignCompleted && (
+              <div className="auto-countdown-banner">
+                <div className="flex items-center gap-3">
+                  <div className={`countdown-circle ${isPaused ? 'paused' : ''}`}>
+                    <span>{isPaused ? '⏸' : `${countdown}s`}</span>
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-800">
+                      {isPaused
+                        ? 'Auto-Pilot Paused'
+                        : `Next message automatically opening in ${countdown} seconds...`}
+                    </h4>
+                    <p className="text-xs text-slate-500">
+                      Target: WhatsApp Web ({currentRecipient?.name || 'Customer'})
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="btn-secondary text-xs py-1 px-3"
+                    onClick={() => setShowAutoSendModal(true)}
+                  >
+                    <Zap size={13} className="text-amber-500" />
+                    <span>Zero-Click Guide</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* Progress Bar */}
             <div className="campaign-progress-bar-wrapper">
               <div className="progress-info-row">
@@ -590,10 +870,7 @@ export default function CampaignManager({
                 <span className="font-bold text-emerald-600">{progressPercent}% Completed</span>
               </div>
               <div className="progress-track">
-                <div
-                  className="progress-fill"
-                  style={{ width: `${progressPercent}%` }}
-                ></div>
+                <div className="progress-fill" style={{ width: `${progressPercent}%` }}></div>
               </div>
             </div>
 
@@ -608,11 +885,11 @@ export default function CampaignManager({
                 <span className="stat-num text-slate-600">{pendingCount}</span>
               </div>
               <div className="camp-stat-box">
-                <span className="stat-label">WhatsApp Opened</span>
+                <span className="stat-label">WhatsApp Dispatched</span>
                 <span className="stat-num text-amber-500">{openedCount}</span>
               </div>
               <div className="camp-stat-box">
-                <span className="stat-label">Confirmed Sent</span>
+                <span className="stat-label">Confirmed Completed</span>
                 <span className="stat-num text-emerald-600">{completedCount}</span>
               </div>
               <div className="camp-stat-box">
@@ -622,7 +899,7 @@ export default function CampaignManager({
             </div>
           </div>
 
-          {/* Main Workspace: Active Contact Dispatcher vs Preview */}
+          {/* Main Active Dispatch Grid */}
           <div className="active-dispatch-grid">
             {/* Left: Active Contact Controller */}
             <div className="active-contact-card">
@@ -633,50 +910,54 @@ export default function CampaignManager({
                       <span className="recipient-indexer">
                         Recipient #{currentIndex + 1} of {totalCount}
                       </span>
-                      <h3 className="recipient-name-large">
-                        {currentRecipient.name}
-                      </h3>
-                      <span className="recipient-phone-pill">
-                        +{currentRecipient.phone}
-                      </span>
+                      <h3 className="recipient-name-large">{currentRecipient.name}</h3>
+                      <span className="recipient-phone-pill">+{currentRecipient.phone}</span>
                     </div>
 
                     <div className="recipient-status-display">
                       <span className="text-xs text-slate-500 uppercase font-semibold">Status:</span>
                       <span className={`status-badge-pill badge-${currentRecipient.status.toLowerCase()}`}>
-                        {currentRecipient.status === 'Opened'
-                          ? 'WhatsApp Opened (Awaiting Send)'
-                          : currentRecipient.status}
+                        {currentRecipient.status === 'Opened' ? 'Dispatched to WhatsApp' : currentRecipient.status}
                       </span>
                     </div>
                   </div>
 
-                  {/* Instructions Callout */}
+                  {/* Auto-Pilot Dispatch Notification Callout */}
                   <div className="dispatch-instructions-box">
-                    <div className="step-indicator">
-                      <span className="step-badge">Step 1</span>
-                      <span>Click <strong>"Open WhatsApp Conversation"</strong> to launch WhatsApp with this message.</span>
-                    </div>
-                    <div className="step-indicator">
-                      <span className="step-badge">Step 2</span>
-                      <span>Hit WhatsApp's green Send button in the WhatsApp window.</span>
-                    </div>
-                    <div className="step-indicator">
-                      <span className="step-badge">Step 3</span>
-                      <span>Click <strong>"Confirm Sent & Next"</strong> below to record confirmation and advance.</span>
-                    </div>
+                    {campaignMode === 'auto' ? (
+                      <div className="flex items-start gap-2.5">
+                        <Zap size={18} className="text-amber-500 shrink-0 mt-0.5" />
+                        <div>
+                          <strong>Auto-Pilot Active:</strong> Messages are automatically pushed directly into WhatsApp Web.
+                          <div className="text-xs text-slate-500 mt-1">
+                            In WhatsApp Web, simply hit Enter or use our zero-click auto-clicker script to send hands-free!
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="step-indicator">
+                          <span className="step-badge">Step 1</span>
+                          <span>Click <strong>"Open WhatsApp Web Directly"</strong> to launch this customer's chat.</span>
+                        </div>
+                        <div className="step-indicator">
+                          <span className="step-badge">Step 2</span>
+                          <span>Click <strong>"Confirm Sent & Next"</strong> to record send confirmation and advance.</span>
+                        </div>
+                      </>
+                    )}
                   </div>
 
-                  {/* Primary Action Buttons */}
+                  {/* Action Buttons */}
                   <div className="dispatch-actions-group">
                     <button
                       type="button"
                       className="btn-send-whatsapp btn-large w-full"
-                      onClick={handleOpenWhatsApp}
-                      disabled={isPaused}
+                      onClick={handleOpenWhatsAppManual}
+                      title="Open WhatsApp Web directly with this message"
                     >
                       <Send size={19} />
-                      <span>Open WhatsApp Conversation</span>
+                      <span>Re-Open Direct in WhatsApp Web</span>
                     </button>
 
                     <div className="dispatch-secondary-actions">
@@ -684,8 +965,7 @@ export default function CampaignManager({
                         type="button"
                         className="btn-confirm-sent"
                         onClick={handleConfirmSentAndNext}
-                        disabled={isPaused}
-                        title="Confirm that you clicked send in WhatsApp"
+                        title="Confirm that message was sent"
                       >
                         <CheckCheck size={18} />
                         <span>Confirm Sent & Next</span>
@@ -733,13 +1013,9 @@ export default function CampaignManager({
                   <CheckCircle2 size={54} className="text-emerald-500 animate-bounce" />
                   <h3>All Campaign Recipients Processed!</h3>
                   <p className="text-sm text-slate-600 mt-2">
-                    You have finished processing all contacts in this campaign.
+                    All contacts in this campaign have been dispatched.
                   </p>
-                  <button
-                    type="button"
-                    className="btn-primary mt-4"
-                    onClick={handleExportReport}
-                  >
+                  <button type="button" className="btn-primary mt-4" onClick={handleExportReport}>
                     <Download size={16} />
                     <span>Download Final Campaign Report</span>
                   </button>
@@ -747,7 +1023,7 @@ export default function CampaignManager({
               )}
             </div>
 
-            {/* Right: Realistic WhatsApp Mobile Preview with Dynamic Personalization */}
+            {/* Right: Message Preview */}
             <div className="active-preview-column">
               <MessagePreview
                 message={currentPersonalizedMessage}
@@ -765,7 +1041,6 @@ export default function CampaignManager({
                 <h3 className="queue-card-title">Campaign Recipient Queue</h3>
               </div>
 
-              {/* Status Filter Chips */}
               <div className="status-filter-pills">
                 {['all', 'pending', 'opened', 'completed', 'skipped'].map((filterKey) => (
                   <button
@@ -803,7 +1078,7 @@ export default function CampaignManager({
                         <td className="font-mono text-xs">{idx + 1}</td>
                         <td className="font-semibold text-slate-800">
                           {rec.name}
-                          {isCurrent && <span className="active-row-indicator">Current</span>}
+                          {isCurrent && <span className="active-row-indicator">Active</span>}
                         </td>
                         <td className="font-mono text-slate-600">+{rec.phone}</td>
                         <td>
@@ -833,17 +1108,19 @@ export default function CampaignManager({
         </div>
       )}
 
-      {/* ===================== CONFIRMATION MODAL BEFORE STARTING CAMPAIGN ===================== */}
+      {/* Confirmation Modal Before Launching */}
       {showConfirmModal && (
         <div className="modal-backdrop">
           <div className="modal-dialog max-w-lg">
             <div className="modal-header">
               <div className="modal-header-icon-group">
-                <div className="icon-shield-wrapper">
-                  <Play size={22} className="text-emerald-600" />
+                <div className="icon-shield-wrapper bg-amber-100 text-amber-600">
+                  <Zap size={22} />
                 </div>
                 <div>
-                  <h3 className="modal-title">Ready to Start Campaign?</h3>
+                  <h3 className="modal-title">
+                    Launch {campaignMode === 'auto' ? 'Auto-Pilot' : 'Manual'} Campaign
+                  </h3>
                   <p className="modal-subtitle">{campaignName}</p>
                 </div>
               </div>
@@ -851,36 +1128,43 @@ export default function CampaignManager({
 
             <div className="modal-body space-y-3">
               <p className="text-sm text-slate-600">
-                You are about to start a campaign for <strong>{parseRecipients().length} recipient(s)</strong>.
+                You are about to launch a campaign for <strong>{parseRecipients().length} recipient(s)</strong>.
               </p>
 
-              <div className="compliance-banner-info text-xs">
-                <Info size={16} />
-                <span>
-                  <strong>Safety Notice:</strong> To adhere to WhatsApp terms, each conversation will be opened with the prefilled message. You will manually confirm each send before moving forward.
-                </span>
-              </div>
+              {campaignMode === 'auto' ? (
+                <div className="alert-box alert-success text-xs">
+                  <Zap size={16} className="text-emerald-600 shrink-0" />
+                  <span>
+                    <strong>Auto-Pilot Enabled:</strong> WhatsApp Web will open directly, and messages will automatically advance every <strong>{autoDelaySeconds} seconds</strong>. You can pause or stop at any time.
+                  </span>
+                </div>
+              ) : (
+                <div className="compliance-banner-info text-xs">
+                  <Info size={16} />
+                  <span>
+                    <strong>Manual Mode:</strong> Each recipient conversation will be opened one at a time for your manual review and confirmation.
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="modal-footer">
-              <button
-                type="button"
-                className="btn-cancel"
-                onClick={() => setShowConfirmModal(false)}
-              >
+              <button type="button" className="btn-cancel" onClick={() => setShowConfirmModal(false)}>
                 Cancel
               </button>
-              <button
-                type="button"
-                className="btn-primary"
-                onClick={handleConfirmStartCampaign}
-              >
-                Start Campaign
+              <button type="button" className="btn-primary" onClick={handleConfirmStartCampaign}>
+                Start Dispatching Now
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* Zero-Click Guide Modal */}
+      <AutoSendGuideModal
+        isOpen={showAutoSendModal}
+        onClose={() => setShowAutoSendModal(false)}
+      />
     </div>
   );
 }

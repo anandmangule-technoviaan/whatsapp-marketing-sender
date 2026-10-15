@@ -92,12 +92,26 @@ export function validatePhoneNumber(rawInput, defaultDialCode = '91') {
 }
 
 /**
- * Generates the official WhatsApp Click-to-Chat URL
- * Format: https://wa.me/PHONENUMBER?text=ENCODED_MESSAGE
+ * Generates the WhatsApp URL based on preferred dispatch engine:
+ * - 'web': Direct WhatsApp Web (bypasses intermediate landing page)
+ * - 'app': Native WhatsApp Windows/Mac App (whatsapp:// protocol)
+ * - 'universal': Standard wa.me click-to-chat
  */
-export function generateWhatsAppUrl(phoneNumber, message) {
+export function generateWhatsAppUrl(phoneNumber, message, engine = 'web') {
   const cleanedNumber = cleanPhoneNumber(phoneNumber);
   const encodedMessage = encodeURIComponent(message || '');
+
+  if (engine === 'app') {
+    // Native Windows WhatsApp application protocol
+    return `whatsapp://send?phone=${cleanedNumber}&text=${encodedMessage}`;
+  }
+
+  if (engine === 'web') {
+    // Direct WhatsApp Web (bypasses intermediate landing page)
+    return `https://web.whatsapp.com/send/?phone=${cleanedNumber}&text=${encodedMessage}&type=phone_number&app_absent=0`;
+  }
+
+  // Universal wa.me router
   return `https://wa.me/${cleanedNumber}?text=${encodedMessage}`;
 }
 
